@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Matrix Cam (Res & Contrast)</title>
+    <title>Matrix Cam (Color Select)</title>
     <style>
         body {
             background-color: #000;
@@ -26,63 +26,78 @@
             left: 50%;
             transform: translateX(-50%);
             width: 95%;
-            max-width: 600px;
-            background: rgba(0, 0, 0, 0.85);
-            border: 1px solid #444;
-            padding: 12px;
+            max-width: 500px;
+            background: rgba(0, 0, 0, 0.9);
+            border: 1px solid #333;
+            padding: 15px;
             border-radius: 16px;
             z-index: 100;
             display: flex;
-            gap: 10px;
-            align-items: center;
-            backdrop-filter: blur(4px);
+            flex-direction: column;
+            gap: 15px;
+            backdrop-filter: blur(5px);
         }
 
         .ui-hidden { display: none; }
 
-        /* Button Styles */
+        /* Top Row: Buttons */
+        .row-buttons {
+            display: flex;
+            gap: 10px;
+            height: 45px;
+        }
+
         button {
-            height: 50px;
             border: none;
             border-radius: 8px;
             font-weight: bold;
             font-size: 14px;
             cursor: pointer;
-            color: black;
-            transition: background 0.2s;
+            transition: all 0.2s;
         }
-        
-        #btnStart { flex: 1; background: #eee; }
-        #btnStart.active { background: #ff4444; color: white; }
-        
-        #btnSwitch { width: 50px; background: #444; color: white; font-size: 22px; }
-        #btnSnap { width: 50px; background: #fff; font-size: 20px; }
 
-        /* Sliders Container */
-        .sliders {
-            flex: 2;
+        #btnStart { flex: 2; background: #eee; color: black; }
+        #btnStart.active { background: #ff4444; color: white; }
+        #btnSwitch { flex: 1; background: #333; color: white; font-size: 20px; }
+        #btnSnap { flex: 1; background: #444; color: white; font-size: 18px; }
+
+        /* Color Input Styling */
+        .color-wrapper {
+            flex: 1;
+            position: relative;
+            overflow: hidden;
+            border-radius: 8px;
+            border: 2px solid #555;
+            background: black;
+        }
+        input[type="color"] {
+            position: absolute;
+            top: -10px; left: -10px;
+            width: 200%; height: 200%;
+            cursor: pointer;
+            border: none;
+            background: none;
+        }
+
+        /* Bottom Row: Sliders */
+        .row-sliders {
+            display: flex;
+            gap: 15px;
+        }
+        .slider-group {
+            flex: 1;
             display: flex;
             flex-direction: column;
-            gap: 8px;
         }
-
-        .slider-row {
-            display: flex;
-            align-items: center;
-            gap: 5px;
-        }
-
         label {
-            color: #aaa;
-            font-size: 10px;
-            width: 25px;
-            font-weight: bold;
+            color: #888; font-size: 10px; font-weight: bold; margin-bottom: 5px;
+            display: flex; justify-content: space-between;
         }
-
         input[type=range] {
-            flex-grow: 1;
+            width: 100%;
             height: 4px;
             accent-color: white;
+            cursor: pointer;
         }
 
         video { display: none; }
@@ -91,26 +106,32 @@
 <body>
 
     <div class="ui-container" id="ui">
-        <!-- Main Button -->
-        <button onclick="toggleCamera()" id="btnStart">START</button>
         
-        <!-- Switch Cam -->
-        <button onclick="switchCamera()" id="btnSwitch">↻</button>
-        
-        <!-- Settings -->
-        <div class="sliders">
-            <div class="slider-row">
-                <label>RES</label>
+        <!-- Row 1: Controls -->
+        <div class="row-buttons">
+            <button onclick="toggleCamera()" id="btnStart">START</button>
+            <button onclick="switchCamera()" id="btnSwitch">↻</button>
+            
+            <!-- Color Picker -->
+            <div class="color-wrapper" title="Change Color">
+                <input type="color" id="colorPicker" value="#ffffff">
+            </div>
+
+            <button onclick="takeSnapshot()" id="btnSnap">📷</button>
+        </div>
+
+        <!-- Row 2: Sliders -->
+        <div class="row-sliders">
+            <div class="slider-group">
+                <label>SIZE</label>
                 <input type="range" id="resolution" min="30" max="150" value="70">
             </div>
-            <div class="slider-row">
-                <label>CON</label>
+            <div class="slider-group">
+                <label>CONTRAST</label>
                 <input type="range" id="contrast" min="0" max="255" value="100">
             </div>
         </div>
 
-        <!-- Snapshot -->
-        <button onclick="takeSnapshot()" id="btnSnap">📷</button>
     </div>
 
     <video id="video" playsinline autoplay muted></video>
@@ -121,6 +142,7 @@
         const canvas = document.getElementById('canvas');
         const ctx = canvas.getContext('2d');
         const btnStart = document.getElementById('btnStart');
+        const colorPicker = document.getElementById('colorPicker');
         
         const GLYPHS = "  .:-~=+*#%@";
         
@@ -135,7 +157,6 @@
                 video.srcObject.getTracks().forEach(t => t.stop());
             }
 
-            // Ideal constraints usually work better than Exact
             const constraints = {
                 video: {
                     facingMode: useFrontCamera ? "user" : "environment",
@@ -162,7 +183,6 @@
 
         function toggleCamera() {
             if (streaming) {
-                // Stop
                 streaming = false;
                 cancelAnimationFrame(animationId);
                 if(video.srcObject) {
@@ -171,20 +191,17 @@
                 }
                 btnStart.innerText = "START";
                 btnStart.classList.remove("active");
-                
-                // Clear screen
                 ctx.fillStyle = "black";
                 ctx.fillRect(0, 0, canvas.width, canvas.height);
             } else {
-                // Start
                 startStream();
             }
         }
 
         function switchCamera() {
             if (!streaming) return;
-            useFrontCamera = !useFrontCamera; // Toggle boolean
-            startStream(); // Restart with new mode
+            useFrontCamera = !useFrontCamera;
+            startStream();
         }
 
         // --- RENDER LOOP ---
@@ -192,7 +209,7 @@
         function loop() {
             if (!streaming) return;
 
-            // 1. Setup Canvas
+            // 1. Resize
             if (canvas.width !== window.innerWidth || canvas.height !== window.innerHeight) {
                 canvas.width = window.innerWidth;
                 canvas.height = window.innerHeight;
@@ -200,69 +217,58 @@
             const w = canvas.width;
             const h = canvas.height;
 
-            // 2. Read Sliders
-            // Resolution Slider: Controls how many columns fit on screen
+            // 2. Read UI
             const resValue = parseInt(document.getElementById('resolution').value);
-            // Contrast Slider: Controls math threshold
             const contrastValue = parseInt(document.getElementById('contrast').value);
+            const selectedColor = colorPicker.value; // Read Color
 
-            // Calculate Font Size based on Resolution Slider
-            // High Res (150) = Small Font. Low Res (30) = Big Font.
+            // 3. Grid Calculation
             const fontSize = Math.max(6, w / resValue);
-            
             const cols = Math.ceil(w / fontSize);
-            const rows = Math.ceil(h / (fontSize * 0.8)); // 0.8 adjusts for font height
+            const rows = Math.ceil(h / (fontSize * 0.8));
 
-            // 3. Process Video Frame
+            // 4. Process Video
             const tempCanvas = document.createElement('canvas');
             const tempCtx = tempCanvas.getContext('2d');
             tempCanvas.width = cols;
             tempCanvas.height = rows;
 
-            // Mirror logic (Front camera only)
             if (useFrontCamera) {
                 tempCtx.translate(cols, 0);
                 tempCtx.scale(-1, 1);
             }
 
-            // Draw video to tiny canvas
             tempCtx.drawImage(video, 0, 0, cols, rows);
             const pixels = tempCtx.getImageData(0, 0, cols, rows).data;
 
-            // 4. Draw Matrix to Screen
+            // 5. Draw
             ctx.fillStyle = "black";
             ctx.fillRect(0, 0, w, h);
             
             ctx.font = `bold ${fontSize}px monospace`;
             ctx.textAlign = "center";
             ctx.textBaseline = "middle";
-            ctx.fillStyle = "white";
+            
+            // APPLY SELECTED COLOR HERE
+            ctx.fillStyle = selectedColor; 
 
             for (let y = 0; y < rows; y++) {
                 for (let x = 0; x < cols; x++) {
                     const i = (y * cols + x) * 4;
-                    
-                    // Grayscale
                     let gray = (pixels[i] + pixels[i+1] + pixels[i+2]) / 3;
 
-                    // Apply Contrast Formula
-                    // factor calculates how much to stretch the colors
+                    // Contrast
                     const factor = (259 * (contrastValue + 255)) / (255 * (259 - contrastValue));
                     gray = factor * (gray - 128) + 128;
 
-                    // Skip dark pixels to save CPU and look cooler
                     if (gray < 30) continue; 
 
-                    // Map brightness to character
                     const charIndex = Math.floor((gray / 255) * (GLYPHS.length - 1));
-                    // Clamp index to prevent errors
                     const safeIndex = Math.max(0, Math.min(GLYPHS.length-1, charIndex));
-                    const char = GLYPHS[safeIndex];
-
-                    // Draw
+                    
                     const posX = x * fontSize + (fontSize/2);
                     const posY = y * (fontSize * 0.8) + (fontSize/2);
-                    ctx.fillText(char, posX, posY);
+                    ctx.fillText(GLYPHS[safeIndex], posX, posY);
                 }
             }
 
@@ -271,12 +277,12 @@
 
         function takeSnapshot() {
             const link = document.createElement('a');
-            link.download = 'matrix_capture.png';
+            link.download = `matrix_${new Date().getTime()}.png`;
             link.href = canvas.toDataURL();
             link.click();
         }
 
-        // Tap background to toggle UI
+        // Tap to toggle UI
         document.body.addEventListener('click', (e) => {
             if(!e.target.closest('.ui-container')) {
                 document.getElementById('ui').classList.toggle('ui-hidden');
