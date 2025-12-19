@@ -3,83 +3,88 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Matrix Cam (Color Select)</title>
+    <title>Matrix Cam (Optimized)</title>
     <style>
         body {
             background-color: #000;
             margin: 0;
             overflow: hidden;
             font-family: 'Courier New', monospace;
-            touch-action: none;
+            touch-action: none; /* Prevents zooming/scrolling */
+            -webkit-user-select: none; /* Prevent text selection */
+            user-select: none;
         }
 
         canvas {
             display: block;
-            width: 100vw;
-            height: 100vh;
+            width: 100%;
+            height: 100%;
         }
 
-        /* UI Container */
+        /* UI Panel */
         .ui-container {
             position: absolute;
             bottom: 20px;
             left: 50%;
             transform: translateX(-50%);
             width: 95%;
-            max-width: 500px;
-            background: rgba(0, 0, 0, 0.9);
-            border: 1px solid #333;
+            max-width: 550px;
+            background: rgba(10, 10, 10, 0.9);
+            border: 1px solid #444;
             padding: 15px;
             border-radius: 16px;
             z-index: 100;
             display: flex;
             flex-direction: column;
-            gap: 15px;
-            backdrop-filter: blur(5px);
+            gap: 12px;
+            backdrop-filter: blur(8px);
+            transition: opacity 0.3s ease;
         }
 
-        .ui-hidden { display: none; }
+        .ui-hidden { opacity: 0; pointer-events: none; }
 
-        /* Top Row: Buttons */
+        /* Row 1: Buttons */
         .row-buttons {
             display: flex;
-            gap: 10px;
-            height: 45px;
+            gap: 8px;
+            height: 44px;
         }
 
         button {
             border: none;
             border-radius: 8px;
-            font-weight: bold;
+            font-weight: 700;
             font-size: 14px;
             cursor: pointer;
-            transition: all 0.2s;
+            text-transform: uppercase;
         }
+        
+        button:active { transform: scale(0.98); }
 
-        #btnStart { flex: 2; background: #eee; color: black; }
-        #btnStart.active { background: #ff4444; color: white; }
-        #btnSwitch { flex: 1; background: #333; color: white; font-size: 20px; }
-        #btnSnap { flex: 1; background: #444; color: white; font-size: 18px; }
+        #btnStart { flex: 2; background: #eee; color: #000; }
+        #btnStart.active { background: #ff3b3b; color: #fff; }
+        
+        #btnSwitch { flex: 1; background: #333; color: #fff; font-size: 18px; }
+        #btnSnap { flex: 1; background: #444; color: #fff; font-size: 18px; }
 
-        /* Color Input Styling */
-        .color-wrapper {
+        /* Color Picker Wrapper */
+        .color-wrap {
             flex: 1;
             position: relative;
-            overflow: hidden;
+            background: #000;
+            border: 2px solid #666;
             border-radius: 8px;
-            border: 2px solid #555;
-            background: black;
+            overflow: hidden;
         }
         input[type="color"] {
             position: absolute;
-            top: -10px; left: -10px;
+            top: -50%; left: -50%;
             width: 200%; height: 200%;
             cursor: pointer;
-            border: none;
-            background: none;
+            border: none; background: none;
         }
 
-        /* Bottom Row: Sliders */
+        /* Row 2: Sliders */
         .row-sliders {
             display: flex;
             gap: 15px;
@@ -88,16 +93,25 @@
             flex: 1;
             display: flex;
             flex-direction: column;
+            justify-content: center;
         }
         label {
-            color: #888; font-size: 10px; font-weight: bold; margin-bottom: 5px;
-            display: flex; justify-content: space-between;
+            color: #888; font-size: 10px; font-weight: bold; 
+            margin-bottom: 4px; letter-spacing: 1px;
         }
         input[type=range] {
             width: 100%;
             height: 4px;
-            accent-color: white;
-            cursor: pointer;
+            background: #555;
+            border-radius: 2px;
+            appearance: none;
+            outline: none;
+        }
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 16px; height: 16px;
+            background: #fff;
+            border-radius: 50%;
         }
 
         video { display: none; }
@@ -106,61 +120,70 @@
 <body>
 
     <div class="ui-container" id="ui">
-        
-        <!-- Row 1: Controls -->
+        <!-- Buttons & Color -->
         <div class="row-buttons">
-            <button onclick="toggleCamera()" id="btnStart">START</button>
-            <button onclick="switchCamera()" id="btnSwitch">↻</button>
-            
-            <!-- Color Picker -->
-            <div class="color-wrapper" title="Change Color">
-                <input type="color" id="colorPicker" value="#ffffff">
+            <button id="btnStart">START</button>
+            <button id="btnSwitch">↻</button>
+            <div class="color-wrap" title="Text Color">
+                <input type="color" id="colorPicker" value="#00FF00">
             </div>
-
-            <button onclick="takeSnapshot()" id="btnSnap">📷</button>
+            <button id="btnSnap">📷</button>
         </div>
 
-        <!-- Row 2: Sliders -->
+        <!-- Sliders -->
         <div class="row-sliders">
             <div class="slider-group">
                 <label>SIZE</label>
-                <input type="range" id="resolution" min="30" max="150" value="70">
+                <input type="range" id="resolution" min="20" max="120" value="60">
             </div>
             <div class="slider-group">
                 <label>CONTRAST</label>
                 <input type="range" id="contrast" min="0" max="255" value="100">
             </div>
         </div>
-
     </div>
 
-    <video id="video" playsinline autoplay muted></video>
+    <!-- Hidden Elements -->
+    <video id="video" playsinline muted></video>
     <canvas id="canvas"></canvas>
 
     <script>
+        // --- 1. SETUP & CACHING ---
         const video = document.getElementById('video');
         const canvas = document.getElementById('canvas');
-        const ctx = canvas.getContext('2d');
-        const btnStart = document.getElementById('btnStart');
-        const colorPicker = document.getElementById('colorPicker');
+        const ctx = canvas.getContext('2d', { alpha: false }); // Opt: Disable alpha for speed
+        const ui = document.getElementById('ui');
         
+        // UI Elements
+        const btnStart = document.getElementById('btnStart');
+        const btnSwitch = document.getElementById('btnSwitch');
+        const btnSnap = document.getElementById('btnSnap');
+        const colorPicker = document.getElementById('colorPicker');
+        const sliderRes = document.getElementById('resolution');
+        const sliderCon = document.getElementById('contrast');
+
+        // OPTIMIZATION: Create temp canvas once, reuse it.
+        const tempCanvas = document.createElement('canvas');
+        // 'willReadFrequently' makes getImageData much faster
+        const tempCtx = tempCanvas.getContext('2d', { willReadFrequently: true }); 
+
         const GLYPHS = "  .:-~=+*#%@";
         
         let streaming = false;
         let animationId;
         let useFrontCamera = true;
+        let lastFontSize = 0; // Cache to avoid resetting font string
 
-        // --- CAMERA LOGIC ---
+        // --- 2. CAMERA CONTROLLER ---
 
-        async function startStream() {
-            if(video.srcObject) {
-                video.srcObject.getTracks().forEach(t => t.stop());
-            }
+        async function startCamera() {
+            // Stop any previous stream first
+            stopCamera(false);
 
             const constraints = {
                 video: {
                     facingMode: useFrontCamera ? "user" : "environment",
-                    width: { ideal: 640 },
+                    width: { ideal: 640 }, // Keep resolution low for performance
                     height: { ideal: 480 }
                 }
             };
@@ -169,123 +192,171 @@
                 const stream = await navigator.mediaDevices.getUserMedia(constraints);
                 video.srcObject = stream;
                 
-                video.onloadedmetadata = () => {
-                    video.play();
-                    streaming = true;
-                    btnStart.innerText = "STOP";
-                    btnStart.classList.add("active");
-                    loop();
-                };
+                // Wait for stream to be ready
+                await video.play();
+                
+                streaming = true;
+                btnStart.innerText = "STOP";
+                btnStart.classList.add("active");
+                loop();
+
             } catch (err) {
-                alert("Camera Error: " + err.name);
+                console.error(err);
+                alert("Camera Error: " + err.name + "\nEnsure you are using HTTPS.");
             }
         }
 
-        function toggleCamera() {
-            if (streaming) {
-                streaming = false;
-                cancelAnimationFrame(animationId);
-                if(video.srcObject) {
-                    video.srcObject.getTracks().forEach(t => t.stop());
-                    video.srcObject = null;
-                }
+        function stopCamera(clearScreen = true) {
+            streaming = false;
+            cancelAnimationFrame(animationId);
+            
+            if (video.srcObject) {
+                const tracks = video.srcObject.getTracks();
+                tracks.forEach(track => track.stop());
+                video.srcObject = null;
+            }
+
+            if (clearScreen) {
                 btnStart.innerText = "START";
                 btnStart.classList.remove("active");
                 ctx.fillStyle = "black";
                 ctx.fillRect(0, 0, canvas.width, canvas.height);
-            } else {
-                startStream();
             }
         }
 
-        function switchCamera() {
-            if (!streaming) return;
-            useFrontCamera = !useFrontCamera;
-            startStream();
-        }
-
-        // --- RENDER LOOP ---
+        // --- 3. THE OPTIMIZED LOOP ---
 
         function loop() {
             if (!streaming) return;
 
-            // 1. Resize
+            // A. Handle Resizing
             if (canvas.width !== window.innerWidth || canvas.height !== window.innerHeight) {
                 canvas.width = window.innerWidth;
                 canvas.height = window.innerHeight;
+                lastFontSize = 0; // Force font update
             }
             const w = canvas.width;
             const h = canvas.height;
 
-            // 2. Read UI
-            const resValue = parseInt(document.getElementById('resolution').value);
-            const contrastValue = parseInt(document.getElementById('contrast').value);
-            const selectedColor = colorPicker.value; // Read Color
+            // B. Inputs
+            const resVal = parseInt(sliderRes.value);
+            const contrastVal = parseInt(sliderCon.value);
+            const colorVal = colorPicker.value;
 
-            // 3. Grid Calculation
-            const fontSize = Math.max(6, w / resValue);
+            // C. Calculations
+            // Inverted logic: Higher slider = Smaller text (High Res)
+            const fontSize = Math.max(8, w / resVal); 
             const cols = Math.ceil(w / fontSize);
             const rows = Math.ceil(h / (fontSize * 0.8));
 
-            // 4. Process Video
-            const tempCanvas = document.createElement('canvas');
-            const tempCtx = tempCanvas.getContext('2d');
-            tempCanvas.width = cols;
-            tempCanvas.height = rows;
-
-            if (useFrontCamera) {
-                tempCtx.translate(cols, 0);
-                tempCtx.scale(-1, 1);
+            // D. Temp Canvas Management (Only resize if grid changed)
+            if (tempCanvas.width !== cols || tempCanvas.height !== rows) {
+                tempCanvas.width = cols;
+                tempCanvas.height = rows;
             }
 
-            tempCtx.drawImage(video, 0, 0, cols, rows);
-            const pixels = tempCtx.getImageData(0, 0, cols, rows).data;
+            // E. Draw Video to Temp Canvas
+            // Mirroring logic
+            if (useFrontCamera) {
+                tempCtx.save();
+                tempCtx.translate(cols, 0);
+                tempCtx.scale(-1, 1);
+                tempCtx.drawImage(video, 0, 0, cols, rows);
+                tempCtx.restore();
+            } else {
+                tempCtx.drawImage(video, 0, 0, cols, rows);
+            }
 
-            // 5. Draw
+            // F. Get Pixels (Fast due to 'willReadFrequently')
+            const frame = tempCtx.getImageData(0, 0, cols, rows);
+            const data = frame.data;
+
+            // G. Rendering
+            // Clear screen
             ctx.fillStyle = "black";
             ctx.fillRect(0, 0, w, h);
-            
-            ctx.font = `bold ${fontSize}px monospace`;
-            ctx.textAlign = "center";
-            ctx.textBaseline = "middle";
-            
-            // APPLY SELECTED COLOR HERE
-            ctx.fillStyle = selectedColor; 
 
+            // Set Font (Only if changed to save overhead)
+            if (fontSize !== lastFontSize) {
+                ctx.font = `bold ${fontSize}px monospace`;
+                ctx.textAlign = "center";
+                ctx.textBaseline = "middle";
+                lastFontSize = fontSize;
+            }
+            
+            ctx.fillStyle = colorVal;
+
+            // Contrast Pre-calculation
+            // Formula: factor * (color - 128) + 128
+            const factor = (259 * (contrastVal + 255)) / (255 * (259 - contrastVal));
+
+            // Iterate
             for (let y = 0; y < rows; y++) {
                 for (let x = 0; x < cols; x++) {
                     const i = (y * cols + x) * 4;
-                    let gray = (pixels[i] + pixels[i+1] + pixels[i+2]) / 3;
+                    
+                    // Simple Luminance
+                    let gray = (data[i] + data[i+1] + data[i+2]) / 3;
 
-                    // Contrast
-                    const factor = (259 * (contrastValue + 255)) / (255 * (259 - contrastValue));
+                    // Apply Contrast
                     gray = factor * (gray - 128) + 128;
 
-                    if (gray < 30) continue; 
+                    // Optimization: Skip empty/black pixels
+                    if (gray < 40) continue;
 
-                    const charIndex = Math.floor((gray / 255) * (GLYPHS.length - 1));
-                    const safeIndex = Math.max(0, Math.min(GLYPHS.length-1, charIndex));
+                    // Map to Char
+                    // Use bitwise OR | 0 for fast integer flooring
+                    const charIdx = ((gray / 255) * (GLYPHS.length - 1)) | 0;
+                    // Clamp
+                    const safeIdx = charIdx < 0 ? 0 : (charIdx >= GLYPHS.length ? GLYPHS.length - 1 : charIdx);
                     
-                    const posX = x * fontSize + (fontSize/2);
-                    const posY = y * (fontSize * 0.8) + (fontSize/2);
-                    ctx.fillText(GLYPHS[safeIndex], posX, posY);
+                    // Draw
+                    ctx.fillText(
+                        GLYPHS[safeIdx], 
+                        x * fontSize + (fontSize >> 1), 
+                        y * (fontSize * 0.8) + (fontSize >> 1)
+                    );
                 }
             }
 
             animationId = requestAnimationFrame(loop);
         }
 
-        function takeSnapshot() {
-            const link = document.createElement('a');
-            link.download = `matrix_${new Date().getTime()}.png`;
-            link.href = canvas.toDataURL();
-            link.click();
-        }
+        // --- 4. EVENT LISTENERS ---
 
-        // Tap to toggle UI
+        btnStart.addEventListener('click', () => {
+            if (streaming) stopCamera();
+            else startCamera();
+        });
+
+        btnSwitch.addEventListener('click', () => {
+            if (!streaming) return;
+            useFrontCamera = !useFrontCamera;
+            startCamera();
+        });
+
+        btnSnap.addEventListener('click', () => {
+            const link = document.createElement('a');
+            link.download = `matrix_${Date.now()}.png`;
+            link.href = canvas.toDataURL('image/png');
+            link.click();
+            
+            // Visual Flash feedback
+            const flash = document.createElement('div');
+            flash.style.position = 'fixed';
+            flash.style.top = 0; flash.style.left = 0;
+            flash.style.width = '100%'; flash.style.height = '100%';
+            flash.style.background = 'white'; flash.style.opacity = '0.8';
+            flash.style.zIndex = 200;
+            document.body.appendChild(flash);
+            setTimeout(() => flash.remove(), 100);
+        });
+
+        // Toggle UI
         document.body.addEventListener('click', (e) => {
-            if(!e.target.closest('.ui-container')) {
-                document.getElementById('ui').classList.toggle('ui-hidden');
+            // Only hide if clicking the canvas/background, not the UI itself
+            if (!e.target.closest('.ui-container')) {
+                ui.classList.toggle('ui-hidden');
             }
         });
 
