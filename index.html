@@ -2,15 +2,15 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Matrix Cam (Double Tap Switch)</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Matrix Cam (Fixed Switch)</title>
     <style>
         body {
             background-color: #000;
             margin: 0;
             overflow: hidden;
             font-family: 'Courier New', monospace;
-            touch-action: manipulation; /* Improves tap response */
+            touch-action: none; /* Prevents browser zooming */
         }
 
         canvas {
@@ -25,169 +25,139 @@
             bottom: 30px;
             left: 50%;
             transform: translateX(-50%);
-            width: 90%;
+            width: 95%;
             max-width: 500px;
-            background: rgba(10, 10, 10, 0.85);
-            backdrop-filter: blur(5px);
-            padding: 15px;
-            border-radius: 12px;
-            border: 1px solid #333;
+            background: rgba(10, 10, 10, 0.9);
+            border: 1px solid #444;
+            padding: 10px;
+            border-radius: 15px;
             z-index: 100;
             display: flex;
-            gap: 10px;
+            gap: 8px;
             align-items: center;
-            transition: opacity 0.3s;
         }
 
-        .ui-hidden { opacity: 0; pointer-events: none; }
+        .ui-hidden { display: none; }
 
+        /* Buttons */
         button {
-            background: white; color: black; border: none;
-            padding: 12px; border-radius: 6px; font-weight: bold; cursor: pointer;
-            flex-grow: 1;
+            background: #eee; color: black; border: none;
+            height: 45px;
+            border-radius: 8px;
+            font-weight: bold;
+            font-size: 14px;
+            cursor: pointer;
         }
-        #btnSnap { background: #333; color: white; border: 1px solid #555; }
+        
+        #btnStart { flex-grow: 2; }
+        #btnSwitch { flex-grow: 1; background: #444; color: white; font-size: 20px;}
+        #btnSnap { flex-grow: 1; background: #ff4444; color: white;}
 
-        .slider-box { display: flex; flex-direction: column; flex-grow: 2; }
-        label { font-size: 10px; color: #888; margin-bottom: 5px; }
+        /* Slider */
+        .slider-box { flex-grow: 3; display: flex; flex-direction: column; padding: 0 5px; }
+        label { color: #888; font-size: 10px; margin-bottom: 2px;}
         input[type=range] { width: 100%; }
 
         video { display: none; }
         
-        .hint {
-            position: absolute; top: 10px; width: 100%; text-align: center;
-            color: rgba(255,255,255,0.4); font-size: 10px; pointer-events: none; z-index: 50;
-        }
-
-        /* Notification Toast */
-        #toast {
-            position: absolute; top: 50%; left: 50%;
-            transform: translate(-50%, -50%);
-            background: rgba(255, 255, 255, 0.9);
-            color: black; padding: 10px 20px; border-radius: 20px;
-            font-weight: bold; opacity: 0; transition: opacity 0.5s;
-            pointer-events: none; z-index: 200;
+        .debug-msg {
+            position: absolute; top: 10px; left: 10px; 
+            color: lime; background: rgba(0,0,0,0.5); 
+            font-size: 10px; pointer-events: none;
         }
     </style>
 </head>
 <body>
 
-    <div class="hint">DOUBLE TAP TO SWITCH CAMERA • TAP ONCE TO HIDE UI</div>
-    <div id="toast">Switching Camera...</div>
+    <div class="debug-msg" id="debug">Ready.</div>
 
     <div class="ui-container" id="ui">
-        <button onclick="toggleCamera()" id="btnCam">START</button>
+        <button onclick="toggleCamera()" id="btnStart">START</button>
+        <button onclick="switchCamera()" id="btnSwitch">↻</button>
+        
         <div class="slider-box">
-            <label>Brightness</label>
-            <input type="range" id="contrast" min="0" max="255" value="60">
+            <label>BRIGHTNESS</label>
+            <input type="range" id="contrast" min="0" max="255" value="80">
         </div>
-        <button onclick="takeSnapshot()" id="btnSnap">SAVE</button>
+        
+        <button onclick="takeSnapshot()" id="btnSnap">📷</button>
     </div>
 
-    <video id="video" playsinline></video>
+    <video id="video" playsinline autoplay muted></video>
     <canvas id="canvas"></canvas>
 
     <script>
         const video = document.getElementById('video');
         const canvas = document.getElementById('canvas');
         const ctx = canvas.getContext('2d');
-        const ui = document.getElementById('ui');
-        const toast = document.getElementById('toast');
-
+        const debug = document.getElementById('debug');
+        
         const GLYPHS = "  .:-~=+*#%@";
+        
         let streaming = false;
         let animationId;
-        
-        // State
-        let currentFacingMode = 'user'; // 'user' (front) or 'environment' (back)
+        let useFrontCamera = true; // Track which camera we want
 
-        // --- DOUBLE TAP LOGIC ---
-        let lastTapTime = 0;
-        
-        document.body.addEventListener('touchstart', (e) => {
-            // Ignore touches on the buttons
-            if(e.target.closest('.ui-container')) return;
-
-            const currentTime = new Date().getTime();
-            const tapLength = currentTime - lastTapTime;
-
-            if (tapLength < 300 && tapLength > 0) {
-                // Double Tap Detected
-                e.preventDefault(); // Prevent zoom
-                switchCamera();
-            } else {
-                // Single Tap Detected (Toggle UI)
-                // We verify it wasn't a double tap by waiting slightly? 
-                // For simplicity, we toggle UI instantly, double tap might flicker UI but that's okay.
-                ui.classList.toggle('ui-hidden');
-            }
-            lastTapTime = currentTime;
-        });
-
-        // --- CAMERA FUNCTIONS ---
-
-        async function switchCamera() {
-            if (!streaming) return;
-            
-            // Show Toast
-            toast.style.opacity = 1;
-            setTimeout(() => toast.style.opacity = 0, 1000);
-
-            // Toggle Mode
-            currentFacingMode = (currentFacingMode === 'user') ? 'environment' : 'user';
-
-            // Restart Stream
-            stopStream();
-            await startStream();
-        }
-
-        async function toggleCamera() {
-            if (streaming) {
-                stopStream();
-                document.getElementById('btnCam').innerText = "START";
-                // Clear screen
-                ctx.fillStyle = "black";
-                ctx.fillRect(0, 0, canvas.width, canvas.height);
-            } else {
-                await startStream();
-                document.getElementById('btnCam').innerText = "STOP";
-            }
-        }
-
-        function stopStream() {
-            if(video.srcObject) {
-                video.srcObject.getTracks().forEach(track => track.stop());
-                video.srcObject = null;
-            }
-            streaming = false;
-            cancelAnimationFrame(animationId);
-        }
+        // --- CAMERA LOGIC ---
 
         async function startStream() {
-            try {
-                const constraints = { 
-                    video: { 
-                        facingMode: { exact: currentFacingMode } 
-                    } 
-                };
-                
-                // Fallback for laptops that don't support "exact"
-                const fallbackConstraints = { video: { facingMode: currentFacingMode } };
+            // Stop existing if any
+            if(video.srcObject) {
+                video.srcObject.getTracks().forEach(t => t.stop());
+            }
 
-                try {
-                    video.srcObject = await navigator.mediaDevices.getUserMedia(constraints);
-                } catch(e) {
-                    video.srcObject = await navigator.mediaDevices.getUserMedia(fallbackConstraints);
+            // Define Constraints
+            // We use 'ideal' instead of 'exact' so it doesn't crash if the camera is missing
+            const constraints = {
+                video: {
+                    facingMode: useFrontCamera ? "user" : "environment",
+                    width: { ideal: 640 }, // Lower res runs faster
+                    height: { ideal: 480 }
                 }
+            };
 
-                video.play();
+            try {
+                debug.innerText = `Requesting: ${useFrontCamera ? "Front" : "Back"}...`;
+                const stream = await navigator.mediaDevices.getUserMedia(constraints);
+                video.srcObject = stream;
+                
+                // Wait for video to actually start
                 video.onloadedmetadata = () => {
+                    video.play();
                     streaming = true;
+                    document.getElementById('btnStart').innerText = "STOP";
+                    debug.innerText = "Running: " + (useFrontCamera ? "Front" : "Back");
                     loop();
                 };
             } catch (err) {
-                alert("Camera error: " + err);
+                console.error(err);
+                alert("Camera Error: " + err.name + "\n(Make sure you are using HTTPS!)");
+                debug.innerText = "Error: " + err.name;
             }
+        }
+
+        function toggleCamera() {
+            if (streaming) {
+                streaming = false;
+                cancelAnimationFrame(animationId);
+                if(video.srcObject) {
+                    video.srcObject.getTracks().forEach(t => t.stop());
+                    video.srcObject = null;
+                }
+                document.getElementById('btnStart').innerText = "START";
+                ctx.fillStyle = "black";
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+            } else {
+                startStream();
+            }
+        }
+
+        function switchCamera() {
+            if (!streaming) return;
+            // Flip the boolean
+            useFrontCamera = !useFrontCamera;
+            // Restart
+            startStream();
         }
 
         // --- RENDER LOOP ---
@@ -195,43 +165,41 @@
         function loop() {
             if (!streaming) return;
 
+            // 1. Resize Canvas if needed
             if (canvas.width !== window.innerWidth || canvas.height !== window.innerHeight) {
                 canvas.width = window.innerWidth;
                 canvas.height = window.innerHeight;
             }
+            const w = canvas.width;
+            const h = canvas.height;
 
-            const width = canvas.width;
-            const height = canvas.height;
+            // 2. Settings
             const contrastVal = parseInt(document.getElementById('contrast').value);
-            
-            // Responsive Grid
-            const fontSize = Math.max(10, width / 60); // 60 columns roughly
-            const lineHeight = fontSize * 0.8;
-            const cols = Math.ceil(width / fontSize);
-            const rows = Math.ceil(height / lineHeight);
+            const fontSize = Math.max(8, w / 70); // Dynamic text size
+            const cols = Math.ceil(w / fontSize);
+            const rows = Math.ceil(h / (fontSize * 0.8));
 
-            // Temp Canvas
+            // 3. Process Video
             const tempCanvas = document.createElement('canvas');
             const tempCtx = tempCanvas.getContext('2d');
             tempCanvas.width = cols;
             tempCanvas.height = rows;
 
-            // DRAW & MIRROR LOGIC
-            if (currentFacingMode === 'user') {
-                // Front Camera: Mirror it (Flip Horizontal)
+            // MIRROR LOGIC:
+            // Only mirror if using Front Camera
+            if (useFrontCamera) {
                 tempCtx.translate(cols, 0);
                 tempCtx.scale(-1, 1);
-            } else {
-                // Back Camera: Do NOT mirror
-                // (No code needed, default is normal)
             }
-            
+
+            // Draw video to tiny canvas
             tempCtx.drawImage(video, 0, 0, cols, rows);
             const pixels = tempCtx.getImageData(0, 0, cols, rows).data;
 
-            // Render
+            // 4. Draw Matrix
             ctx.fillStyle = "black";
-            ctx.fillRect(0, 0, width, height);
+            ctx.fillRect(0, 0, w, h);
+            
             ctx.font = `bold ${fontSize}px monospace`;
             ctx.textAlign = "center";
             ctx.textBaseline = "middle";
@@ -240,34 +208,40 @@
             for (let y = 0; y < rows; y++) {
                 for (let x = 0; x < cols; x++) {
                     const i = (y * cols + x) * 4;
-                    const r = pixels[i];
-                    const g = pixels[i + 1];
-                    const b = pixels[i + 2];
                     
-                    // Simple Grayscale
-                    let gray = (r + g + b) / 3;
+                    // Grayscale
+                    let gray = (pixels[i] + pixels[i+1] + pixels[i+2]) / 3;
 
-                    // Contrast
+                    // Apply Contrast
                     const factor = (259 * (contrastVal + 255)) / (255 * (259 - contrastVal));
                     gray = factor * (gray - 128) + 128;
 
-                    if (gray < 40) continue; // Skip darks
+                    if (gray < 30) continue; // Skip dark pixels
 
                     const charIndex = Math.floor((gray / 255) * (GLYPHS.length - 1));
                     const char = GLYPHS[Math.max(0, Math.min(GLYPHS.length-1, charIndex))];
 
-                    ctx.fillText(char, x * fontSize + (fontSize/2), y * lineHeight + (lineHeight/2));
+                    ctx.fillText(char, x * fontSize + fontSize/2, y * (fontSize*0.8) + (fontSize*0.4));
                 }
             }
+
             animationId = requestAnimationFrame(loop);
         }
 
         function takeSnapshot() {
             const link = document.createElement('a');
-            link.download = 'matrix_snap.png';
+            link.download = 'matrix.png';
             link.href = canvas.toDataURL();
             link.click();
         }
+
+        // Tap to hide UI (Optional)
+        document.body.addEventListener('click', (e) => {
+            if(!e.target.closest('.ui-container')) {
+                document.getElementById('ui').classList.toggle('ui-hidden');
+            }
+        });
+
     </script>
 </body>
 </html>
