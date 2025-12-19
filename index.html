@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live Matrix Camera</title>
+    <style>
+        body {
+            background-color: #000;
+            color: white;
+            font-family: 'Courier New', monospace;
+            text-align: center;
+            margin: 0;
+            overflow: hidden; /* Hide scrollbars */
+        }
+
+        .ui-overlay {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.8);
+            padding: 15px;
+            border-radius: 8px;
+            border: 1px solid #444;
+            z-index: 10;
+            display: flex;
+            gap: 15px;
+            align-items: center;
+        }
+
+        button {
+            background: white;
+            color: black;
+            border: none;
+            padding: 8px 15px;
+            cursor: pointer;
+            font-weight: bold;
+            font-family: inherit;
+        }
+        button:hover { background: #ccc; }
+        
+        button.record { background: #ff4444; color: white; }
+
+        .slider-group {
+            display: flex;
+            flex-direction: column;
+            text-align: left;
+        }
+        
+        label { font-size: 10px; color: #aaa; margin-bottom: 2px;}
+
+        /* The canvas covers the whole screen */
+        canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        /* Hide the raw video element */
+        video { display: none; }
+    </style>
+</head>
+<body>
+
+    <div class="ui-overlay">
+        <button onclick="toggleCamera()" id="btnCam">Start Camera</button>
+        
+        <div class="slider-group">
+            <label>DENSITY</label>
+            <input type="range" id="resolution" min="40" max="150" value="80">
+        </div>
+
+        <div class="slider-group">
+            <label>CONTRAST</label>
+            <input type="range" id="contrast" min="0" max="255" value="50">
+        </div>
+
+        <button onclick="takeSnapshot()">📸 Save</button>
+    </div>
+
+    <!-- Hidden video source -->
+    <video id="video" playsinline></video>
+    
+    <!-- Output Canvas -->
+    <canvas id="canvas"></canvas>
+
+    <script>
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const btnCam = document.getElementById('btnCam');
+        
+        // Glyphs: Dark to Light
+        const GLYPHS = "  .:-=+*#%@";
+        
+        let animationId;
+        let streaming = false;
+
+        // 1. Camera Logic
+        async function toggleCamera() {
+            if (streaming) {
+                // Stop
+                const stream = video.srcObject;
+                const tracks = stream.getTracks();
+                tracks.forEach(track => track.stop());
+                video.srcObject = null;
+                cancelAnimationFrame(animationId);
+                streaming = false;
+                btnCam.innerText = "Start Camera";
+            } else {
+                // Start
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
+                    video.srcObject = stream;
+                    video.play();
+                    video.onloadedmetadata = () => {
+                        streaming = true;
+                        btnCam.innerText = "Stop Camera";
+                        loop();
+                    };
+                } catch (err) {
+                    alert("Error accessing camera: " + err);
+                }
+            }
+        }
+
+        // 2. The Processing Loop
+        function loop() {
+            if (!streaming) return;
+
+            // Settings
+            const cols = parseInt(document.getElementById('resolution').value);
+            const contrastVal = parseInt(document.getElementById('contrast').value);
+            
+            // Maintain aspect ratio
+            const aspectRatio = video.videoHeight / video.videoWidth;
+            const rows = Math.floor(cols * aspectRatio * 0.6); // 0.6 fixes font height
+
+            // Resize Canvas to fit screen, but keep resolution logic separate
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            
+            // Calculate font size to fill the screen
+            const fontSize = canvas.width / cols;
+            ctx.font = `${fontSize}px monospace`;
+            ctx.textBaseline = "top";
+
+            // Temporary canvas to read pixels (Downscaling happens here)
+            const tempCanvas = document.createElement('canvas');
+            const tempCtx = tempCanvas.getContext('2d');
+            tempCanvas.width = cols;
+            tempCanvas.height = rows;
+            
+            // Draw video to small canvas (Mirror effect included using scale)
+            tempCtx.translate(cols, 0);
+            tempCtx.scale(-1, 1);
+            tempCtx.drawImage(video, 0, 0, cols, rows);
+
+            // Read pixels
+            const frame = tempCtx.getImageData(0, 0, cols, rows);
+            const data = frame.data;
+
+            // Clear Screen
+            ctx.fillStyle = "black";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = "white"; // Pure White Ink
+
+            // Draw ASCII
+            for (let y = 0; y < rows; y++) {
+                for (let x = 0; x < cols; x++) {
+                    const index = (y * cols + x) * 4;
+                    const r = data[index];
+                    const g = data[index+1];
+                    const b = data[index+2];
+
+                    // Grayscale
+                    let gray = (r + g + b) / 3;
+
+                    // Apply Contrast
+                    const factor = (259 * (contrastVal + 255)) / (255 * (259 - contrastVal));
+                    gray = factor * (gray - 128) + 128;
+                    gray = Math.max(0, Math.min(255, gray));
+
+                    // Map to character
+                    if (gray > 20) { // Skip black pixels for performance
+                        const charIndex = Math.floor((gray / 255) * (GLYPHS.length - 1));
+                        const char = GLYPHS[charIndex];
+                        
+                        // Draw
+                        ctx.fillText(char, x * fontSize, y * (fontSize/0.6));
+                    }
+                }
+            }
+
+            animationId = requestAnimationFrame(loop);
+        }
+
+        function takeSnapshot() {
+            const link = document.createElement('a');
+            link.download = 'matrix_selfie.png';
+            link.href = canvas.toDataURL();
+            link.click();
+        }
+    </script>
+</body>
+</html>
