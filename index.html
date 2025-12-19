@@ -3,30 +3,30 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Responsive Matrix Cam</title>
+    <title>Matrix Cam (Double Tap Switch)</title>
     <style>
         body {
             background-color: #000;
             margin: 0;
-            overflow: hidden; /* No scrolling */
+            overflow: hidden;
             font-family: 'Courier New', monospace;
+            touch-action: manipulation; /* Improves tap response */
         }
 
-        /* The Matrix Canvas */
         canvas {
             display: block;
             width: 100vw;
             height: 100vh;
         }
 
-        /* UI Controls */
+        /* UI Container */
         .ui-container {
             position: absolute;
-            bottom: 30px; /* Moved to bottom for easier thumb reach on mobile */
+            bottom: 30px;
             left: 50%;
             transform: translateX(-50%);
             width: 90%;
-            max-width: 600px;
+            max-width: 500px;
             background: rgba(10, 10, 10, 0.85);
             backdrop-filter: blur(5px);
             padding: 15px;
@@ -34,74 +34,53 @@
             border: 1px solid #333;
             z-index: 100;
             display: flex;
-            flex-wrap: wrap;
             gap: 10px;
-            justify-content: center;
             align-items: center;
-            transition: opacity 0.5s;
+            transition: opacity 0.3s;
         }
 
-        .ui-hidden {
-            opacity: 0;
-            pointer-events: none;
-        }
+        .ui-hidden { opacity: 0; pointer-events: none; }
 
-        /* Buttons */
         button {
-            background: white;
-            color: black;
-            border: none;
-            padding: 12px 20px;
-            border-radius: 6px;
-            font-weight: bold;
-            font-size: 14px;
-            cursor: pointer;
-            flex: 1 1 auto; /* Grow to fill space */
+            background: white; color: black; border: none;
+            padding: 12px; border-radius: 6px; font-weight: bold; cursor: pointer;
+            flex-grow: 1;
         }
-        button:active { background: #ccc; }
         #btnSnap { background: #333; color: white; border: 1px solid #555; }
 
-        /* Sliders */
-        .slider-box {
-            display: flex;
-            flex-direction: column;
-            flex: 1 1 100px;
-        }
-        label { font-size: 10px; color: #888; text-transform: uppercase; margin-bottom: 5px; }
-        input[type=range] { width: 100%; cursor: pointer; }
+        .slider-box { display: flex; flex-direction: column; flex-grow: 2; }
+        label { font-size: 10px; color: #888; margin-bottom: 5px; }
+        input[type=range] { width: 100%; }
 
-        /* Hidden video element */
         video { display: none; }
         
-        /* Tap hint */
         .hint {
-            position: absolute;
-            top: 10px;
-            width: 100%;
-            text-align: center;
-            color: rgba(255,255,255,0.3);
-            font-size: 10px;
-            pointer-events: none;
+            position: absolute; top: 10px; width: 100%; text-align: center;
+            color: rgba(255,255,255,0.4); font-size: 10px; pointer-events: none; z-index: 50;
+        }
+
+        /* Notification Toast */
+        #toast {
+            position: absolute; top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(255, 255, 255, 0.9);
+            color: black; padding: 10px 20px; border-radius: 20px;
+            font-weight: bold; opacity: 0; transition: opacity 0.5s;
+            pointer-events: none; z-index: 200;
         }
     </style>
 </head>
 <body>
 
-    <div class="hint">TAP SCREEN TO HIDE UI</div>
+    <div class="hint">DOUBLE TAP TO SWITCH CAMERA • TAP ONCE TO HIDE UI</div>
+    <div id="toast">Switching Camera...</div>
 
     <div class="ui-container" id="ui">
         <button onclick="toggleCamera()" id="btnCam">START</button>
-        
-        <div class="slider-box">
-            <label>Size</label>
-            <input type="range" id="density" min="30" max="150" value="60">
-        </div>
-
         <div class="slider-box">
             <label>Brightness</label>
             <input type="range" id="contrast" min="0" max="255" value="60">
         </div>
-
         <button onclick="takeSnapshot()" id="btnSnap">SAVE</button>
     </div>
 
@@ -113,54 +92,109 @@
         const canvas = document.getElementById('canvas');
         const ctx = canvas.getContext('2d');
         const ui = document.getElementById('ui');
-        
-        const GLYPHS = "  .:-~=+*#%@"; // Characters
+        const toast = document.getElementById('toast');
+
+        const GLYPHS = "  .:-~=+*#%@";
         let streaming = false;
         let animationId;
+        
+        // State
+        let currentFacingMode = 'user'; // 'user' (front) or 'environment' (back)
 
-        // Toggle UI visibility on click/tap
-        document.body.addEventListener('click', (e) => {
-            // Don't hide if clicking buttons
+        // --- DOUBLE TAP LOGIC ---
+        let lastTapTime = 0;
+        
+        document.body.addEventListener('touchstart', (e) => {
+            // Ignore touches on the buttons
             if(e.target.closest('.ui-container')) return;
-            ui.classList.toggle('ui-hidden');
+
+            const currentTime = new Date().getTime();
+            const tapLength = currentTime - lastTapTime;
+
+            if (tapLength < 300 && tapLength > 0) {
+                // Double Tap Detected
+                e.preventDefault(); // Prevent zoom
+                switchCamera();
+            } else {
+                // Single Tap Detected (Toggle UI)
+                // We verify it wasn't a double tap by waiting slightly? 
+                // For simplicity, we toggle UI instantly, double tap might flicker UI but that's okay.
+                ui.classList.toggle('ui-hidden');
+            }
+            lastTapTime = currentTime;
         });
 
-        // 1. Start/Stop Camera
+        // --- CAMERA FUNCTIONS ---
+
+        async function switchCamera() {
+            if (!streaming) return;
+            
+            // Show Toast
+            toast.style.opacity = 1;
+            setTimeout(() => toast.style.opacity = 0, 1000);
+
+            // Toggle Mode
+            currentFacingMode = (currentFacingMode === 'user') ? 'environment' : 'user';
+
+            // Restart Stream
+            stopStream();
+            await startStream();
+        }
+
         async function toggleCamera() {
             if (streaming) {
-                const stream = video.srcObject;
-                stream.getTracks().forEach(track => track.stop());
-                video.srcObject = null;
-                streaming = false;
+                stopStream();
                 document.getElementById('btnCam').innerText = "START";
-                cancelAnimationFrame(animationId);
-                // Clear canvas
+                // Clear screen
                 ctx.fillStyle = "black";
                 ctx.fillRect(0, 0, canvas.width, canvas.height);
             } else {
-                try {
-                    // constraints: try to face user, fallback to environment
-                    const constraints = { video: { facingMode: "user" } };
-                    const stream = await navigator.mediaDevices.getUserMedia(constraints);
-                    video.srcObject = stream;
-                    video.play();
-                    video.onloadedmetadata = () => {
-                        streaming = true;
-                        document.getElementById('btnCam').innerText = "STOP";
-                        loop();
-                    };
-                } catch (err) {
-                    alert("Camera error: " + err);
-                }
+                await startStream();
+                document.getElementById('btnCam').innerText = "STOP";
             }
         }
 
-        // 2. The Loop
+        function stopStream() {
+            if(video.srcObject) {
+                video.srcObject.getTracks().forEach(track => track.stop());
+                video.srcObject = null;
+            }
+            streaming = false;
+            cancelAnimationFrame(animationId);
+        }
+
+        async function startStream() {
+            try {
+                const constraints = { 
+                    video: { 
+                        facingMode: { exact: currentFacingMode } 
+                    } 
+                };
+                
+                // Fallback for laptops that don't support "exact"
+                const fallbackConstraints = { video: { facingMode: currentFacingMode } };
+
+                try {
+                    video.srcObject = await navigator.mediaDevices.getUserMedia(constraints);
+                } catch(e) {
+                    video.srcObject = await navigator.mediaDevices.getUserMedia(fallbackConstraints);
+                }
+
+                video.play();
+                video.onloadedmetadata = () => {
+                    streaming = true;
+                    loop();
+                };
+            } catch (err) {
+                alert("Camera error: " + err);
+            }
+        }
+
+        // --- RENDER LOOP ---
+
         function loop() {
             if (!streaming) return;
 
-            // A. Handle Responsive Canvas Size
-            // We set the canvas pixel count to match the CSS size
             if (canvas.width !== window.innerWidth || canvas.height !== window.innerHeight) {
                 canvas.width = window.innerWidth;
                 canvas.height = window.innerHeight;
@@ -168,78 +202,69 @@
 
             const width = canvas.width;
             const height = canvas.height;
-
-            // B. Settings
-            // Inverse the slider: Low value = Big Text, High value = Small Text
-            const densityVal = parseInt(document.getElementById('density').value);
             const contrastVal = parseInt(document.getElementById('contrast').value);
             
-            // Calculate Font Size based on width
-            // This ensures text doesn't get too tiny on phones
-            const fontSize = Math.max(8, width / densityVal);
-            const lineHeight = fontSize * 0.8; // Matrix font is tall
-
-            // Define Grid
+            // Responsive Grid
+            const fontSize = Math.max(10, width / 60); // 60 columns roughly
+            const lineHeight = fontSize * 0.8;
             const cols = Math.ceil(width / fontSize);
             const rows = Math.ceil(height / lineHeight);
 
-            // C. Pixel Sampling (The "Cover" Logic)
-            // We draw the video into a tiny offscreen canvas to get pixel data
+            // Temp Canvas
             const tempCanvas = document.createElement('canvas');
             const tempCtx = tempCanvas.getContext('2d');
             tempCanvas.width = cols;
             tempCanvas.height = rows;
 
-            // Draw video stretching to fill grid (Simple responsive fix)
-            // Mirroring the video:
-            tempCtx.translate(cols, 0);
-            tempCtx.scale(-1, 1);
+            // DRAW & MIRROR LOGIC
+            if (currentFacingMode === 'user') {
+                // Front Camera: Mirror it (Flip Horizontal)
+                tempCtx.translate(cols, 0);
+                tempCtx.scale(-1, 1);
+            } else {
+                // Back Camera: Do NOT mirror
+                // (No code needed, default is normal)
+            }
+            
             tempCtx.drawImage(video, 0, 0, cols, rows);
+            const pixels = tempCtx.getImageData(0, 0, cols, rows).data;
 
-            const imageData = tempCtx.getImageData(0, 0, cols, rows);
-            const pixels = imageData.data;
-
-            // D. Render
+            // Render
             ctx.fillStyle = "black";
             ctx.fillRect(0, 0, width, height);
-            
             ctx.font = `bold ${fontSize}px monospace`;
             ctx.textAlign = "center";
             ctx.textBaseline = "middle";
             ctx.fillStyle = "white";
 
-            // Loop through grid
             for (let y = 0; y < rows; y++) {
                 for (let x = 0; x < cols; x++) {
                     const i = (y * cols + x) * 4;
                     const r = pixels[i];
                     const g = pixels[i + 1];
                     const b = pixels[i + 2];
-
+                    
+                    // Simple Grayscale
                     let gray = (r + g + b) / 3;
 
-                    // Contrast Math
+                    // Contrast
                     const factor = (259 * (contrastVal + 255)) / (255 * (259 - contrastVal));
                     gray = factor * (gray - 128) + 128;
 
-                    // Skip dark pixels (Performance + Aesthetic)
-                    if (gray < 30) continue;
+                    if (gray < 40) continue; // Skip darks
 
                     const charIndex = Math.floor((gray / 255) * (GLYPHS.length - 1));
                     const char = GLYPHS[Math.max(0, Math.min(GLYPHS.length-1, charIndex))];
 
-                    // Draw Character
-                    // Use x + 0.5 to center in the grid cell
                     ctx.fillText(char, x * fontSize + (fontSize/2), y * lineHeight + (lineHeight/2));
                 }
             }
-
             animationId = requestAnimationFrame(loop);
         }
 
         function takeSnapshot() {
             const link = document.createElement('a');
-            link.download = 'matrix_responsive.png';
+            link.download = 'matrix_snap.png';
             link.href = canvas.toDataURL();
             link.click();
         }
